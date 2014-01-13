@@ -191,5 +191,8 @@ void *consumer_routine(void *arg) {
   pthread_mutex_unlock(&queue_p->lock);
 
   printf("Exiting thread %x with count value as %d.\n", (unsigned int) pthread_self(), (int)count);
-  return (void*) count;
+  //return (void*) count;
+
+  //Own
+  pthread_exit((void *) count);
 }
