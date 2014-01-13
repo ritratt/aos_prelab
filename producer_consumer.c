@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
   }
 
   printf("Producer thread started with thread id %x\n", (unsigned int) producer_thread);
-/* Bug below - a detached process cannot be joined, which the code attempts later. Commenting this detach takes care of the "failed to join" error.*/
+/* Bug 1. A detached process cannot be joined, which the code attempts later. Commenting this detach takes care of the "failed to join" error.*/
  /* result = pthread_detach(producer_thread);
   if (0 != result)
     fprintf(stderr, "Failed to detach producer thread: %s\n", strerror(result));
@@ -77,13 +77,13 @@ int main(int argc, char **argv) {
     pthread_exit(NULL);
   }
 
-  result = pthread_join(consumer_thread, &thread_return); //Bug here. Must pass thread_return instead of &thread_return to store the retval of the joining (consumer) thread.
+  result = pthread_join(consumer_thread, &thread_return); 
   if (0 != result) {
     fprintf(stderr, "Failed to join consumer thread: %s\n", strerror(result));
     pthread_exit(NULL);
   }
-  printf("\nPrinted %lu characters.\n", (long unsigned) thread_return); //Bug here. Unnecessary cast to pointer of the thread_return. Removing the "*" results in the correct referencing.
-  //Not sure if this is a bug but malloc was never used to allocate memory to thread_return so using free() is resulting in SIGSEV.
+  printf("\nPrinted %lu characters.\n", (long unsigned) thread_return); //Bug4 here. Unnecessary cast to pointer of the thread_return. Removing the "*" results in the correct referencing.
+  //Bug2. Not sure if this is a bug but malloc was never used to allocate memory to thread_return so using free() is resulting in SIGSEV.
   //free(thread_return);
 
   pthread_mutex_destroy(&queue.lock);
@@ -175,7 +175,8 @@ void *consumer_routine(void *arg) {
         queue_p->front->next->prev = NULL;
 
       queue_p->front = queue_p->front->next;
-      pthread_mutex_unlock(&queue_p->lock);
+      //Bug3? Lock outside while but unlock is inside while. 
+      //pthread_mutex_unlock(&queue_p->lock);
 
       /* Print the character, and increment the character count */
       printf("%c from %x\n", prev_node_p->c, (unsigned int) pthread_self());
@@ -186,13 +187,15 @@ void *consumer_routine(void *arg) {
       pthread_mutex_unlock(&queue_p->lock);
       sched_yield();
     }
+    //Own. Out the unlock code outside while.l
+    pthread_mutex_unlock(&queue_p->lock);
   }
   pthread_mutex_unlock(&g_num_prod_lock);
   pthread_mutex_unlock(&queue_p->lock);
 
   printf("Exiting thread %x with count value as %d.\n", (unsigned int) pthread_self(), (int)count);
-  //return (void*) count;
+  return (void*) count;
 
-  //Own
-  pthread_exit((void *) count);
+  //Own - added to check if pthread_exit() results in correct behaviour. It does.
+  //pthread_exit((void *) count);
 }
