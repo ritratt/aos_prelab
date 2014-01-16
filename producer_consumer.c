@@ -28,6 +28,9 @@ void *consumer_routine(void *arg);
 /* Global Data */
 long g_num_prod; /* number of producer threads */
 pthread_mutex_t g_num_prod_lock;
+//Bug3. Fix. Made count a global variable and created a mutex for it.
+long count = 0;
+pthread_mutex_t count_lock;
 
 
 /* Main - entry point */
@@ -55,7 +58,7 @@ int main(int argc, char **argv) {
   }
 
   printf("Producer thread started with thread id %x\n", (unsigned int) producer_thread);
-/* Bug 1. A detached process cannot be joined, which the code attempts later. Commenting this detach takes care of the "failed to join" error.*/
+/* Bug1 - a detached process cannot be joined, which the code attempts later. Commenting this detach takes care of the "failed to join" error.*/
  /* result = pthread_detach(producer_thread);
   if (0 != result)
     fprintf(stderr, "Failed to detach producer thread: %s\n", strerror(result));
@@ -66,8 +69,8 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  //Own
-  printf("Consumer thread %x started from %x.\n",(unsigned int) consumer_thread, (unsigned int) pthread_self());
+  //Own code to test something.
+  //printf("Consumer thread %x started from %x.\n",(unsigned int) consumer_thread, (unsigned int) pthread_self());
 
   /* Join threads, handle return values where appropriate */
 
@@ -82,7 +85,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Failed to join consumer thread: %s\n", strerror(result));
     pthread_exit(NULL);
   }
-  printf("\nPrinted %lu characters.\n", (long unsigned) thread_return); //Bug4 here. Unnecessary cast to pointer of the thread_return. Removing the "*" results in the correct referencing.
+  printf("\nPrinted %lu characters.\n", (long unsigned) thread_return); //Bug2. Unnecessary cast to pointer of the thread_return. Removing the "*" results in the correct referencing.
   //Bug2. Not sure if this is a bug but malloc was never used to allocate memory to thread_return so using free() is resulting in SIGSEV.
   //free(thread_return);
 
@@ -108,7 +111,7 @@ void *producer_routine(void *arg) {
     exit(1);
   }
 
-  //Own
+  //Own code to make output more informative.
   printf("Consumer thread %x started from producer thread %x.\n", (unsigned int) consumer_thread, (unsigned int) pthread_self());
 
   result = pthread_detach(consumer_thread);
@@ -139,11 +142,16 @@ void *producer_routine(void *arg) {
     }
     pthread_mutex_unlock(&queue_p->lock);
 
+    //Own
+    //printf("Pushing producer to end of queue.\n");
     sched_yield();
   }
 
   /* Decrement the number of producer threads running, then return */
+  //Bug4. Did not lock mutex for g_num_prod before changing it. Fixed by locking and unlocking the mutex.
+  pthread_mutex_lock(&g_num_prod_lock);
   --g_num_prod;
+  pthread_mutex_unlock(&g_num_prod_lock);
   return (void*) 0;
 }
 
@@ -152,7 +160,8 @@ void *producer_routine(void *arg) {
 void *consumer_routine(void *arg) {
   queue_t *queue_p = arg;
   queue_node_t *prev_node_p = NULL;
-  long count = 0; /* number of nodes this thread printed */
+  //Bug3. Fix. Made count global variable to print the correct number of character count.
+  //long count = 0; /* number of nodes this thread printed */
 
   printf("Consumer thread started with thread id %x\n", (unsigned int)pthread_self());
 
@@ -161,9 +170,9 @@ void *consumer_routine(void *arg) {
 
   pthread_mutex_lock(&queue_p->lock);
   pthread_mutex_lock(&g_num_prod_lock);
+  //Bug 5. Mutex for queue_p is locked when testing while condition only on the first loop run.
   while(queue_p->front != NULL || g_num_prod > 0) {
     pthread_mutex_unlock(&g_num_prod_lock);
-
     if (queue_p->front != NULL) {
 
       /* Remove the prev item from the queue */
@@ -175,27 +184,35 @@ void *consumer_routine(void *arg) {
         queue_p->front->next->prev = NULL;
 
       queue_p->front = queue_p->front->next;
-      //Bug3? Lock outside while but unlock is inside while. 
+      //Bug 5. Fix. Must unlock mutex AFTER we print the value.
       //pthread_mutex_unlock(&queue_p->lock);
 
       /* Print the character, and increment the character count */
       printf("%c from %x\n", prev_node_p->c, (unsigned int) pthread_self());
       free(prev_node_p);
+      
+      //Bug 5. Fix. Must unlock mutex AFTER we print the value.
+      pthread_mutex_unlock(&queue_p->lock);
+
+      /* Bug3. Fix. Use mutex for lock when changing its value. */
+      pthread_mutex_lock(&count_lock);
       ++count;
+      pthread_mutex_unlock(&count_lock);
     }
     else { /* Queue is empty, so let some other thread run */
       pthread_mutex_unlock(&queue_p->lock);
       sched_yield();
     }
-    //Own. Out the unlock code outside while.l
-    pthread_mutex_unlock(&queue_p->lock);
+    //Bug 5. Fix. Must lock queue_p before the while tests condition. 
+    pthread_mutex_lock(&queue_p->lock);
   }
   pthread_mutex_unlock(&g_num_prod_lock);
   pthread_mutex_unlock(&queue_p->lock);
 
-  printf("Exiting thread %x with count value as %d.\n", (unsigned int) pthread_self(), (int)count);
+  //Own code to test something.
+  //printf("Exiting thread %x with count value as %d.\n", (unsigned int) pthread_self(), (int)count);
   return (void*) count;
 
-  //Own - added to check if pthread_exit() results in correct behaviour. It does.
+  //Own code to test something.
   //pthread_exit((void *) count);
 }
